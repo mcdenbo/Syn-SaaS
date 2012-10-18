@@ -1,0 +1,69 @@
+#!/usr/bin/perl
+
+# This script verifies that replication of a specific test entry works to each host
+# specified, from each master specified.
+
+# Bind credentials
+$BINDDN = '"cn=directory manager"';
+$BINDPW = 'CDEopendj';
+$PORT = 1389;
+
+# All hosts to be checked
+@hosts = ('odjs00000000026.test.statefarm.com');
+
+# Masters to be updated
+@masters = ('odjs00000000024.test.statefarm.com');
+
+# Suffixes to be updated
+@suffixes = ('dc=statefarm,dc=com');
+
+# unique ou of the test entry - if it already exists on any host on any suffix the script will die
+$testou = 'test-001';
+
+# How log to wait for the changes to be replicated
+$delay = '1';
+# Make sure the test entry is not present on any host
+foreach $host (@hosts) {
+ foreach $suffix (@suffixes) {
+   $result = `ldapsearch -h $host -p $PORT -D $BINDDN -w $BINDPW -b \"$suffix\" \"ou=$testou\" dn \| grep \"^dn: \" \| wc -l`;
+   $result =~ (/(\d+)/);
+   if ($1 ne '0') {
+     die "ERROR $host already has test user $usercn\!\n";
+   }
+ }
+}
+
+# Add test entries to each master
+foreach $master (@masters) {
+ open(MOD,"|ldapmodify -h $master -p $PORT -D $BINDDN -w $BINDPW");
+ foreach $suffix (@suffixes) {
+   print MOD "dn: ou=$testou,$suffix\nchangetype: add\nobjectclass: top\nobjectclass: organizationalUnit\n\n";
+ }
+ close(MOD);
+
+# Sleep to allow replication
+ sleep($delay);
+
+# Search each host, each suffix and report
+ foreach $host (@hosts) {
+   foreach $suffix (@suffixes) {
+     $result = `ldapsearch -h $host -p $PORT -D $BINDDN -w $BINDPW -b \"$suffix\" \"ou=$testou\" dn \| grep \"^dn: \" \| wc -l`;
+     $result =~ (/(\d+)/);
+     if ($1 ne '1') {
+       print "FAILED: $master -> $host on suffix $suffix\n";
+     }
+     else {
+        print "OK: $master -> $host on suffix $suffix\n";
+     }
+   }
+   print "\n";
+ }
+
+# Clean up test entries
+ open(MOD,"|ldapmodify -h $master -p $PORT -D $BINDDN -w $BINDPW");
+ foreach $suffix (@suffixes) {
+   print MOD "dn: ou=$testou,$suffix\nchangetype: delete\n\n";
+ }
+ close(MOD);
+ print "\n";
+}
